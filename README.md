@@ -1,6 +1,5 @@
 # cognodb-cloud-benchmark
 
-
 Reproducible benchmark comparing CognoDB Cloud with other graph database platforms.
 
 ## Status
