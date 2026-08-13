@@ -2,7 +2,7 @@
 
 Final read benchmark comparison generated automatically from the completed raw benchmark result files in `results/raw/`.
 
-Report generated: 2026-08-13 20:28:46
+Report generated: 2026-08-13 20:47:22
 
 ## Benchmark Scope
 
