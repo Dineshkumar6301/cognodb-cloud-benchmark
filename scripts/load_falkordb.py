@@ -1,16 +1,20 @@
 import csv
 import os
 import time
+
 import redis
 from dotenv import load_dotenv
 
 load_dotenv()
 
 GRAPH = "benchmark"
-BATCH_SIZE = 100
 
 NODES_FILE = "data/benchmark/nodes_enriched.csv"
 EDGES_FILE = "data/benchmark/edges.csv"
+
+# Large batches = far fewer network round trips
+NODE_BATCH_SIZE = 2000
+EDGE_BATCH_SIZE = 2000
 
 
 def get_client():
@@ -22,7 +26,7 @@ def get_client():
         decode_responses=True,
         ssl=True,
         socket_connect_timeout=15,
-        socket_timeout=60,
+        socket_timeout=120,
     )
 
 
@@ -40,8 +44,8 @@ def clear_graph(client):
 
     try:
         query(client, "MATCH (n) DETACH DELETE n")
-    except Exception as e:
-        print(f"Clear warning: {e}", flush=True)
+    except Exception as exc:
+        print(f"Clear warning: {exc}", flush=True)
 
     print("Graph cleared.", flush=True)
 
@@ -49,20 +53,30 @@ def clear_graph(client):
 def create_indexes(client):
     print("Creating indexes...", flush=True)
 
-    indexes = [
+    statements = [
         "CREATE INDEX FOR (n:Person) ON (n.id)",
         "CREATE INDEX FOR (n:Person) ON (n.age)",
         "CREATE INDEX FOR (n:Person) ON (n.benchmark_group)",
     ]
 
-    for statement in indexes:
+    for statement in statements:
         try:
             query(client, statement)
-        except Exception as e:
-            if "already exists" not in str(e).lower():
-                print(f"Index warning: {e}", flush=True)
+        except Exception as exc:
+            if "already exists" not in str(exc).lower():
+                print(f"Index warning: {exc}", flush=True)
 
     print("Indexes ready.", flush=True)
+
+
+def escape_string(value):
+    return (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\r", "\\r")
+        .replace("\n", "\\n")
+    )
 
 
 def load_nodes(client):
@@ -73,25 +87,32 @@ def load_nodes(client):
     start = time.perf_counter()
     batch = []
 
-    with open(NODES_FILE, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
+    with open(
+        NODES_FILE,
+        "r",
+        encoding="utf-8",
+        newline="",
+    ) as file:
+
+        reader = csv.DictReader(file)
 
         for row in reader:
             batch.append(row)
 
-            if len(batch) >= BATCH_SIZE:
+            if len(batch) >= NODE_BATCH_SIZE:
                 insert_node_batch(client, batch)
-                total += len(batch)
-                batch = []
 
-                if total % 1000 == 0:
-                    elapsed = time.perf_counter() - start
-                    rate = total / elapsed if elapsed else 0
-                    print(
-                        f"Nodes: {total:,}/43,824 "
-                        f"({rate:,.0f}/sec)",
-                        flush=True,
-                    )
+                total += len(batch)
+                batch.clear()
+
+                elapsed = time.perf_counter() - start
+                rate = total / elapsed if elapsed else 0
+
+                print(
+                    f"Nodes: {total:,}/43,824 "
+                    f"({rate:,.0f}/sec)",
+                    flush=True,
+                )
 
         if batch:
             insert_node_batch(client, batch)
@@ -100,9 +121,16 @@ def load_nodes(client):
     elapsed = time.perf_counter() - start
 
     print(
-        f"Nodes loaded: {total:,} | "
-        f"time: {elapsed:.2f}s | "
-        f"throughput: {total / elapsed:,.2f}/sec",
+        f"Nodes loaded: {total:,}",
+        flush=True,
+    )
+    print(
+        f"Node load time: {elapsed:.2f}s",
+        flush=True,
+    )
+    print(
+        f"Node throughput: "
+        f"{total / elapsed:,.2f} nodes/sec",
         flush=True,
     )
 
@@ -111,7 +139,7 @@ def insert_node_batch(client, rows):
     values = []
 
     for row in rows:
-        group = row["benchmark_group"].replace("\\", "\\\\").replace('"', '\\"')
+        group = escape_string(row["benchmark_group"])
 
         values.append(
             "{"
@@ -143,25 +171,32 @@ def load_edges(client):
     start = time.perf_counter()
     batch = []
 
-    with open(EDGES_FILE, "r", encoding="utf-8", newline="") as f:
-        reader = csv.DictReader(f)
+    with open(
+        EDGES_FILE,
+        "r",
+        encoding="utf-8",
+        newline="",
+    ) as file:
+
+        reader = csv.DictReader(file)
 
         for row in reader:
             batch.append(row)
 
-            if len(batch) >= BATCH_SIZE:
+            if len(batch) >= EDGE_BATCH_SIZE:
                 insert_edge_batch(client, batch)
-                total += len(batch)
-                batch = []
 
-                if total % 1000 == 0:
-                    elapsed = time.perf_counter() - start
-                    rate = total / elapsed if elapsed else 0
-                    print(
-                        f"Relationships: {total:,}/150,000 "
-                        f"({rate:,.0f}/sec)",
-                        flush=True,
-                    )
+                total += len(batch)
+                batch.clear()
+
+                elapsed = time.perf_counter() - start
+                rate = total / elapsed if elapsed else 0
+
+                print(
+                    f"Relationships: {total:,}/150,000 "
+                    f"({rate:,.0f}/sec)",
+                    flush=True,
+                )
 
         if batch:
             insert_edge_batch(client, batch)
@@ -170,9 +205,17 @@ def load_edges(client):
     elapsed = time.perf_counter() - start
 
     print(
-        f"Relationships loaded: {total:,} | "
-        f"time: {elapsed:.2f}s | "
-        f"throughput: {total / elapsed:,.2f}/sec",
+        f"Relationships loaded: {total:,}",
+        flush=True,
+    )
+    print(
+        f"Relationship load time: "
+        f"{elapsed:.2f}s",
+        flush=True,
+    )
+    print(
+        f"Relationship throughput: "
+        f"{total / elapsed:,.2f} relationships/sec",
         flush=True,
     )
 
@@ -217,7 +260,10 @@ def main():
     load_edges(client)
 
     print()
-    print("FalkorDB dataset loading completed successfully.", flush=True)
+    print(
+        "FalkorDB dataset loading completed successfully.",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":
