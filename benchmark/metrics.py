@@ -18,7 +18,7 @@ def percentile(values, percentile):
     position = (len(sorted_values) - 1) * (percentile / 100)
 
     lower = int(position)
-    upper = min(lower + 1, len(sorted_values))
+    upper = min(lower + 1, len(sorted_values) - 1)
 
     fraction = position - lower
 
@@ -34,7 +34,14 @@ def summarize_latencies(latencies):
     """
 
     if not latencies:
-        raise ValueError("No latency measurements available.")
+        return {
+            "count": 0,
+            "min_ms": 0.0,
+            "mean_ms": 0.0,
+            "p50_ms": 0.0,
+            "p95_ms": 0.0,
+            "max_ms": 0.0,
+        }
 
     latencies_ms = [
         value * 1000
@@ -83,7 +90,6 @@ def run_workload(
             operation()
 
             elapsed = time.perf_counter() - start
-
             latencies.append(elapsed)
 
         except Exception as exc:
